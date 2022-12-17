@@ -1,0 +1,132 @@
+"""Project Idea: Covid 19 vs Political Party
+
+how do the political parties affect covid cases? 
+
+When you think about political parties people already have opinions from things that already come up in their mind based on their knowledge and what they know from what they read on the news and/or on social media. For democrats for example they are unified in backing vaccinations, they like the use of masks mandated by local communities to stop the spread, and they stick to stricter guidelines from the CDC. And then you think about republicans, you know republicans believe that the outbreak has been made into a bigger deal than it really is, they have my body my choice ideology when it comes to masks and vaccinations so a lot of them are anti-vaxxers, and they want leniency, they want to reopen businesses and return to normalcy right away 
+
+And when you think about that you say okay well then states that are primarily democratic will have a lower number of covid cases than states that are republican, that's what my hypothesis would be and that is what I would assume as well as other folks. And republican states would have a higher count because they are not following CDC guidelines. 
+
+For now, I have found three datasets that can be used for this project. I will be finding more data to reach the minimum of 10 GB. 
+
+The first dataset is:
+https://www.kaggle.com/datasets/johnjdavisiv/us-counties-covid19-weather-sociohealth-data?resource=download
+
+This dataset includes:
+Date, State, County, Fips, Cases, Deaths, Stay_at_home_announcements, Stay_at_home_effectiveness, latitude, and longitude. 
+
+This dataset will help me figure out the number of covid cases within each state and county. 
+
+The second dataset is: 
+https://www.kff.org/other/state-indicator/state-political-parties/?currentTimeframe=0&selectedDistributions=governor-political-affiliation&sortModel=%7B%22colId%22:%22Location%22,%22sort%22:%22asc%22%7D
+
+
+This dataset includes: 
+State and political_party
+
+This dataset will help me see which state is what party
+
+And another dataset that will be used is:
+https://www.kaggle.com/datasets/tunguz/covid19-vaccinations-in-the-united-states-county
+
+This dataset includes: 
+Date, dose1, dose2, county, state, etc
+
+This dataset will help me see how many doses have been taken in each state and county. 
+
+Milestone 2 Data Acquisition:"""
+
+aws configure$ 
+
+pip3 install kaggle
+
+kaggle datasets download --quiet -d paultimothymooney/usa-covid19-vaccinations -p - | aws s3 cp - s3://my-bucket-ua/covidvaccination.zip
+
+kaggle datasets download --quiet -d johnjdavisiv/us-counties-covid19-weather-sociohealth-data -p - | aws s3 cp - s3://my-bucket-ua/covidvaccination.zip
+
+curl -SL 'https://www.kff.org/other/state-indicator/state-political-parties/?currentTimeframe=0&selectedDistributions=governor-political-affiliation&sortModel=%7B%22colId%22:%22Location%22,%22sort%22:%22asc%22%7D' | aws s3 cp  -  s3://my-bucket-ua/states.csv
+
+aws s3 ls s3://my-bucket-ua/
+
+"""Milestone 3 Descriptive Statistics:"""
+
+s3_client = boto3.client('s3')
+#this is getting the object name from the bucket
+obj = s3_client.get_object(Bucket=bucket, Key=file_key)
+#this is creating a data frame using pandas
+df = pd.read_csv(io.BytesIO(obj['Body'].read()))
+print(f"The data set name is {file_key} in the bucket {bucket}")
+print("Top 5 records in the data sets are below")
+print("----------------------------------------------------------------------------------------------")
+#the head will print the top 5 and if you want the bottom 5 use the tail function
+print(df.head())
+print("-----------------------------------------------------------------------------------------------")
+print(f"The number of observations in the data set is {df.shape[0]}")
+print(f"The number of fields in the data set is {df.shape[1]}")
+print("The filed names are below ")
+print(list(df))
+#print("The number of missing values in the fields are below ")
+#print(df.isna().sum())
+print("the number of missing values in the observations are below")
+for i in range(len(df.index)) :
+    print("Nan in row ", i , " : " ,  df.iloc[i].isnull().sum())
+print("-------------------------------------------------------------------------------------------------------------")
+print("descriptive statistics")
+
+
+# this is going to get the data files from the bucket
+df = spark.read.csv('s3://my-bucket-ua/coviddeaths/us_county_sociohealth_data.csv', header = TRUE, inferSchema = TRUE)
+df.printSchema()
+
+#here we are importing pandas
+import pandas as pd 
+pd.DataFrame(df.take(5), columns=df.columns).transpose()
+
+#going to check to see if the classes are balanced
+df.groupby('income_ratio').count().toPandas()
+
+#Drop all columns except the three mentioned
+df = df[["total_population", "num_deaths", "overcrowding", "income_ratio"]]
+df.show
+
+#here we are showing the dataframe
+df.toPandas()
+
+numeric_features = [t[0] for t in df.types if t[1] == 'int']
+df.select(numeric_features).describe().toPandas().transpose
+
+df.dropna()
+
+#Assemble all of the features with VectorAssembler
+required_features =['total_population','num_deaths','overcrowding']
+from pyspark.ml.feature import VectorAssembler
+
+assembler = VectorAssembler(inputCols=required_features, outputCol='features')
+
+transformed_data = assembler.transform(df)
+transformed_data.show()
+
+#Split the data
+(training_data, test_data) = transformed_data.randomSplit([0.8,0.2], seed=2020)
+print("Training Dataset Count: " + str(training_data.count()))
+print("Test Dataset Count: " + str(test_data.count()))
+
+#here we are going to use the Logistic regression model
+from pyspark.ml.classification import LogisticRegression
+
+lr = LogisticRegression(featuresCol = 'features' , labelCol = 'income_ratio', macIter=10)
+lrModel = lr.fit(training_data)
+lr_predictions = lrModel.transform(test_data)
+
+#here we are going to evaluate the logistic regression model
+
+from pyspark.ml.evaluation import MulticlassClassificationEvaluator
+
+multi_evaulator = MultiClassificationEvaluator(labelCol = 'income_ratio', metricNmae = 'accuracy')
+print('Logistic Regression Accuracy', multi_evaluator.evaluate(lr_predictions))
+
+
+
+
+
+
+
